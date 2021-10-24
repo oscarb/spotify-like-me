@@ -1,0 +1,13 @@
+{
+  "name": "spotify-like-me",
+  "version": "1.0.0",
+  "description": "Saves currently playing track to library and related playlists",
+  "author": "oscarb <oscarb@oscarb.se>",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "express": "^4.17.1"
+  }
+}
