@@ -19,4 +19,6 @@ RUN npm install
 COPY . .
 
 EXPOSE 8080
-CMD [ "nodemon", "server.js" ]
+CMD [ "node", "server.js" ]
+
+# CMD ["nodemon", "server.js"]
