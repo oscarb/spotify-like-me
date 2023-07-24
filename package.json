@@ -5,7 +5,8 @@
   "author": "oscarb <oscarb@oscarb.se>",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "start:development": "nodemon --inspect=0.0.0.0 server.js"
   },
   "dependencies": {
     "express": "^4.17.1",

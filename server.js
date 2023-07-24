@@ -41,7 +41,7 @@ async function likePlayingTrack(retryCount = 0) {
 
   try {
     // Get currently playing track 
-    let playingTrackData = await spotifyApi.getMyCurrentPlayingTrack();
+        let playingTrackData = await spotifyApi.getMyCurrentPlayingTrack();
     let trackId = playingTrackData.body.item.id;
     let title = playingTrackData.body.item.name
     let albumId = playingTrackData.body.item.album.id
@@ -95,6 +95,8 @@ async function likePlayingTrack(retryCount = 0) {
     }
 
   } catch (err) {
+    console.log(err);
+
     if (err.statusCode == 401 && retryCount < 5) {
       // Access token likely expired, refresh token
       let data = await spotifyApi.refreshAccessToken();
