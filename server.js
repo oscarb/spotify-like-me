@@ -71,6 +71,7 @@ async function likePlayingTrack(retryCount = 0) {
 
       let playlistData = await spotifyApi.searchPlaylists(seasonPlaylistName);
       seasonPlaylistId = playlistData.body.playlists.items
+        .filter(item => item !== null)
         .find(({ owner, name }) => owner.id == userId && name == seasonPlaylistName)?.id;
 
       if (seasonPlaylistId === undefined) {
