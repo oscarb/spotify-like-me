@@ -2,6 +2,7 @@ services:
 
   spotify-like-me: 
     build: .
+    image: oscarb/spotify-like-me
     container_name: spotify-like-me
     env_file: .env
     volumes:
