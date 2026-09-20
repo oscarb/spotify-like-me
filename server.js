@@ -48,6 +48,7 @@ function sendWebhookNotification(event, message, details = {}) {
     const client = parsedUrl.protocol === 'https:' ? https : http;
 
     const payload = JSON.stringify({
+      app: 'Spotify Like Me',
       content: message,
       text: message,
       message: message,
