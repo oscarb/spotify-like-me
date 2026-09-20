@@ -210,18 +210,18 @@ app.get('/like', async (req, res) => {
     console.error("Error handling /like:", err);
     let statusCode = err.statusCode || 500;
     let event = 'LIKE_FAILED';
-    let message = `⚠️ Failed to like track. Error: ${err.message || err}`;
+    let message = `Failed to like track. Error: ${err.message || err}`;
     let responseText = "Something went wrong";
     let extraDetails = {};
 
     if (statusCode === 401) {
       event = 'AUTH_EXPIRED';
-      message = `⚠️ Authentication expired. Reconnect at: ${process.env.HOST}:${process.env.PORT}/authorize`;
+      message = `Authentication expired. Reconnect at: ${process.env.HOST}:${process.env.PORT}/authorize`;
       responseText = "Authentication expired. Visit /authorize to reconnect.";
       extraDetails.authorizeUrl = `${process.env.HOST}:${process.env.PORT}/authorize`;
     } else if (statusCode === 404) {
       event = 'NO_TRACK_PLAYING';
-      message = "⚠️ No track is currently playing.";
+      message = "No track is currently playing.";
       responseText = "No track is currently playing.";
     }
 
