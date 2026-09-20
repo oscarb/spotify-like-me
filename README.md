@@ -47,13 +47,36 @@ docker run -v /path/to/local/spotify-like-me:/usr/src/app -p 50000:8080 --env-fi
 
 ### Authorize
 
-Follow these simple steps to have the server connect to your Spotify account.
+Spotify refresh tokens expire every 6 months, and Spotify requires redirect URIs to use HTTPS or the loopback address `127.0.0.1`.
 
-1. Open a browser and navigate to http://localhost:5000/authorize 
-2. Open the authorization link given to you in a new tab
-3. Sign into Spotify if required and approve the app permissions
+1. In your [Spotify Developer Dashboard](https://developer.spotify.com/dashboard), add `http://127.0.0.1:50000/callback` (replace with your port) to **Redirect URIs**.
+2. Open a browser and navigate to `http://<HOST>:<PORT>/authorize`.
+3. It will automatically redirect you to Spotify to approve permissions.
+4. Spotify redirects back to `/callback`, and you'll see `Tokens saved!`.
 
-Voila! 🎉  The server should now be authorized on behalf of your account and ready to start liking songs and manage playlists for you.
+### Status & Health Check
+
+You can check the status and remaining days before token expiration at `GET /status`:
+
+```json
+{
+  "status": "ok",
+  "authorized": true,
+  "tokenAgeDays": 5,
+  "expiresInDays": 175,
+  "authorizeUrl": "http://127.0.0.1:50000/authorize"
+}
+```
+
+### Notifications (Optional)
+
+You can configure an agnostic `WEBHOOK_URL` in `.env` to receive notifications when tokens expire or when a `/like` request fails:
+
+```env
+WEBHOOK_URL=http://homeassistant.local:8123/api/webhook/spotify_like_me
+```
+
+When an event occurs (such as `AUTH_EXPIRED`, `NO_TRACK_PLAYING`, or `LIKE_FAILED`), a `POST` request is sent with a universal JSON payload (`message`, `text`, `content`, `event`, `error`, `statusCode`, and `authorizeUrl`), compatible out of the box with Home Assistant, ntfy.sh, Discord, Slack, etc.
 
 #### Note on security 
 
@@ -62,9 +85,8 @@ As of now, there's no security built-in so if your server is exposed to the inte
 ### Start liking music
 
 1. Start listening to music on Spotify
-2. Whenever you hear something good, fire a `GET` request to `http://localhost:5000/like`
+2. Whenever you hear something good, fire a `GET` request to `http://<HOST>:<PORT>/like`
 3. Watch as playlists and like status are magically updated in Spotify
-
 
 ## Real life examples
 
@@ -72,8 +94,11 @@ Some suggestions on how this can be used.
 
 ### Flic
 
-Get a [Flic](https://flic.io/) button and set it up to do a **GET** request to `/like` whenever the button is clicked, double-clicked or held. No more need to be nearby a phone or computer to make sure that aweseome track doesn't go unnoticed! 
+Get a [Flic](https://flic.io/) button and set it up to do a **GET** request to `/like` whenever the button is clicked, double-clicked or held. No more need to be nearby a phone or computer to make sure that awesome track doesn't go unnoticed! 
 
 ### Stream Deck
 
+Set up a System > Website or API action to trigger `GET http://<HOST>:<PORT>/like`. If authorization fails, the server returns an HTTP 401, showing an error badge on the Stream Deck key.
+
 ### Tasker
+

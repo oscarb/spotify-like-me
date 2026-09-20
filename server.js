@@ -1,5 +1,8 @@
 'use strict';
 
+const http = require('http');
+const https = require('https');
+const { URL } = require('url');
 const express = require('express');
 const storage = require('node-persist');
 const config = require('./config')
@@ -29,11 +32,59 @@ initStorage();
 
 async function initStorage() {
   await storage.init();
-  let accessToken = await storage.get('accessToken')
-  let refreshToken = await storage.get('refreshToken')
+  let accessToken = await storage.getItem('accessToken');
+  let refreshToken = await storage.getItem('refreshToken');
 
-  spotifyApi.setAccessToken(accessToken);
-  spotifyApi.setRefreshToken(refreshToken);
+  if (accessToken) spotifyApi.setAccessToken(accessToken);
+  if (refreshToken) spotifyApi.setRefreshToken(refreshToken);
+}
+
+function sendWebhookNotification(event, message, details = {}) {
+  const webhookUrl = process.env.WEBHOOK_URL;
+  if (!webhookUrl) return;
+
+  try {
+    const parsedUrl = new URL(webhookUrl);
+    const client = parsedUrl.protocol === 'https:' ? https : http;
+
+    const payload = JSON.stringify({
+      content: message,
+      text: message,
+      message: message,
+      event: event,
+      ...details
+    });
+
+    const options = {
+      hostname: parsedUrl.hostname,
+      port: parsedUrl.port || (parsedUrl.protocol === 'https:' ? 443 : 80),
+      path: `${parsedUrl.pathname}${parsedUrl.search}`,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(payload)
+      },
+      timeout: 5000
+    };
+
+    const req = client.request(options, (res) => {
+      console.log(`Webhook notification dispatched (status: ${res.statusCode})`);
+    });
+
+    req.on('error', (e) => {
+      console.error(`Error sending webhook notification: ${e.message}`);
+    });
+
+    req.on('timeout', () => {
+      req.destroy();
+      console.error('Webhook notification timed out');
+    });
+
+    req.write(payload);
+    req.end();
+  } catch (err) {
+    console.error(`Failed to dispatch webhook notification: ${err.message}`);
+  }
 }
 
 async function likePlayingTrack(retryCount = 0) {
@@ -41,7 +92,12 @@ async function likePlayingTrack(retryCount = 0) {
 
   try {
     // Get currently playing track 
-        let playingTrackData = await spotifyApi.getMyCurrentPlayingTrack();
+    let playingTrackData = await spotifyApi.getMyCurrentPlayingTrack();
+    if (!playingTrackData.body || !playingTrackData.body.item) {
+      const error = new Error("No track is currently playing on Spotify");
+      error.statusCode = 404;
+      throw error;
+    }
     let trackId = playingTrackData.body.item.id;
     let title = playingTrackData.body.item.name
     let albumId = playingTrackData.body.item.album.id
@@ -100,14 +156,21 @@ async function likePlayingTrack(retryCount = 0) {
 
     if (err.statusCode == 401 && retryCount < 5) {
       // Access token likely expired, refresh token
-      let data = await spotifyApi.refreshAccessToken();
-      console.log("Refreshed token. mew token: " + JSON.stringify(data));
-      spotifyApi.setAccessToken(data.body['access_token']);
-      await storage.set('accessToken', data.body['access_token']);
+      try {
+        let data = await spotifyApi.refreshAccessToken();
+        console.log("Refreshed token. new token: " + JSON.stringify(data));
+        spotifyApi.setAccessToken(data.body['access_token']);
+        await storage.setItem('accessToken', data.body['access_token']);
 
-      return await likePlayingTrack(++retryCount);
+        return await likePlayingTrack(++retryCount);
+      } catch (refreshErr) {
+        console.error("Failed to refresh access token:", refreshErr);
+        const error = new Error("Authentication expired. Reauthorize at /authorize");
+        error.statusCode = 401;
+        throw error;
+      }
     } else {
-      return err;
+      throw err;
     }
   }
 }
@@ -140,19 +203,73 @@ function getSeasonName() {
 }
 
 app.get('/like', async (req, res) => {
-  // Like 
   try {
     await likePlayingTrack();
     res.send("Liked track!");
   } catch (err) {
-    console.log(err);
-    res.send("Something went wrong");
+    console.error("Error handling /like:", err);
+    let statusCode = err.statusCode || 500;
+    let event = 'LIKE_FAILED';
+    let message = `⚠️ Failed to like track. Error: ${err.message || err}`;
+    let responseText = "Something went wrong";
+    let extraDetails = {};
+
+    if (statusCode === 401) {
+      event = 'AUTH_EXPIRED';
+      message = `⚠️ Authentication expired. Reconnect at: ${process.env.HOST}:${process.env.PORT}/authorize`;
+      responseText = "Authentication expired. Visit /authorize to reconnect.";
+      extraDetails.authorizeUrl = `${process.env.HOST}:${process.env.PORT}/authorize`;
+    } else if (statusCode === 404) {
+      event = 'NO_TRACK_PLAYING';
+      message = "⚠️ No track is currently playing.";
+      responseText = "No track is currently playing.";
+    }
+
+    sendWebhookNotification(event, message, {
+      error: err.message || String(err),
+      statusCode: statusCode,
+      ...extraDetails
+    });
+
+    res.status(statusCode).send(responseText);
+  }
+});
+
+app.get('/status', async (req, res) => {
+  try {
+    let authorizedAt = await storage.getItem('authorizedAt');
+    let accessToken = await storage.getItem('accessToken');
+    let refreshToken = await storage.getItem('refreshToken');
+    let hasTokens = !!(accessToken && refreshToken);
+
+    if (!hasTokens) {
+      return res.status(200).json({
+        status: 'unauthorized',
+        authorized: false,
+        message: 'No tokens found, authorize again.',
+        authorizeUrl: `${process.env.HOST}:${process.env.PORT}/authorize`
+      });
+    }
+
+    let tokenAgeDays = authorizedAt ? Math.floor((Date.now() - authorizedAt) / (1000 * 60 * 60 * 24)) : null;
+    let expiresInDays = authorizedAt ? Math.max(0, 180 - tokenAgeDays) : null;
+    let isExpired = expiresInDays !== null && expiresInDays === 0;
+
+    res.status(200).json({
+      status: isExpired ? 'expired' : 'ok',
+      authorized: !isExpired,
+      tokenAgeDays,
+      expiresInDays,
+      authorizeUrl: `${process.env.HOST}:${process.env.PORT}/authorize`
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
 app.get('/authorize', (req, res) => {
   var authorizeUrl = spotifyApi.createAuthorizeURL(scopes, 'state_init');
-  res.send(`Authorization URL: ${authorizeUrl}`);
+  res.redirect(authorizeUrl);
 });
 
 app.get('/callback', (req, res) => {
@@ -168,16 +285,19 @@ app.get('/callback', (req, res) => {
       // Set the access token on the API object to use it in later calls
       let accessToken = data.body['access_token'];
       let refreshToken = data.body['refresh_token'];
+      let authorizedAt = Date.now();
 
-      spotifyApi.setAccessToken(data.body['access_token']);
-      spotifyApi.setRefreshToken(data.body['refresh_token']);
+      spotifyApi.setAccessToken(accessToken);
+      spotifyApi.setRefreshToken(refreshToken);
       await storage.setItem('accessToken', accessToken);
       await storage.setItem('refreshToken', refreshToken);
+      await storage.setItem('authorizedAt', authorizedAt);
 
       res.send(`Tokens saved!`);
     },
     function (err) {
       console.log('Something went wrong!', err);
+      res.status(500).send('Something went wrong authorizing with Spotify.');
     }
   );
 });
